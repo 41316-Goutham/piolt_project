@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CUSTOMER
+}
+
+enum ProjectStatus {
+  LEAD
+  SANCTIONED
+  IN_PROGRESS
+  INSTALLED
+  COMMISSIONED
+  ON_HOLD
+}
+
+enum MilestoneStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  DELAYED
+}
+
+enum InventoryCategory {
+  PANEL
+  INVERTER
+  BATTERY
+  STRUCTURE
+  CABLE
+  ACCESSORY
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(CUSTOMER)
+  phone        String?
+  createdAt    DateTime  @default(now())
+  projects     Project[]
+}
+
+model Company {
+  id            String          @id @default(cuid())
+  name          String          @unique
+  contactEmail  String?
+  contactPhone  String?
+  notes         String?
+  createdAt     DateTime        @default(now())
+  inventoryItems InventoryItem[]
+  projects      Project[]
+}
+
+model InventoryItem {
+  id             String            @id @default(cuid())
+  name           String
+  sku            String            @unique
+  category       InventoryCategory
+  companyId      String
+  company        Company           @relation(fields: [companyId], references: [id])
+  quantityInStock Int              @default(0)
+  unit           String            @default("pcs")
+  unitPrice      Float
+  reorderLevel   Int               @default(10)
+  updatedAt      DateTime          @updatedAt
+  createdAt      DateTime          @default(now())
+  sales          Sale[]
+}
+
+model Project {
+  id                     String        @id @default(cuid())
+  title                  String
+  siteAddress            String
+  capacityKw             Float
+  customerId             String
+  customer               User          @relation(fields: [customerId], references: [id])
+  companyId              String
+  company                Company       @relation(fields: [companyId], references: [id])
+  sanctionedAmount       Float
+  totalCost              Float
+  subsidyAmount          Float         @default(0)
+  status                 ProjectStatus @default(LEAD)
+  progressPercent        Int           @default(0)
+  startDate              DateTime?
+  expectedCompletionDate DateTime?
+  actualCompletionDate   DateTime?
+  createdAt              DateTime      @default(now())
+  milestones             Milestone[]
+  invoices               Invoice[]
+  sales                  Sale[]
+}
+
+model Milestone {
+  id            String          @id @default(cuid())
+  projectId     String
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  order         Int
+  plannedDate   DateTime?
+  completedDate DateTime?
+  status        MilestoneStatus @default(PENDING)
+}
+
+model Sale {
+  id              String        @id @default(cuid())
+  inventoryItemId String
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  projectId       String?
+  project         Project?      @relation(fields: [projectId], references: [id])
+  quantity        Int
+  unitPrice       Float
+  totalAmount     Float
+  saleDate        DateTime      @default(now())
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  invoiceNumber String        @unique
+  projectId     String
+  project       Project       @relation(fields: [projectId], references: [id])
+  amount        Float
+  status        InvoiceStatus @default(DRAFT)
+  issueDate     DateTime      @default(now())
+  dueDate       DateTime
+  paidDate      DateTime?
+  description   String?
+}
