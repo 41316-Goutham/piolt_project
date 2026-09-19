@@ -1,0 +1,6 @@
+.env
+.env.local
+.env.*.local
+.env.vercel-e9c7
+prisma/dev.db
+prisma/dev.db-journal
