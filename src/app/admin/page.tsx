@@ -5,7 +5,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { formatCurrency } from "@/lib/format";
 import { canViewFinance } from "@/lib/roles";
 import { isApprovalStepOverdue } from "@/lib/overdue";
-import { getProjectMargin } from "@/lib/margin";
+import { getProjectMargins } from "@/lib/margin";
 import Link from "next/link";
 
 export default async function AdminOverviewPage() {
@@ -43,8 +43,8 @@ export default async function AdminOverviewPage() {
     });
     receivablesDue = invoices.reduce((sum, inv) => sum + (inv.amount - inv.payments.reduce((s, p) => s + p.amount, 0)), 0);
 
-    const margins = await Promise.all(projects.map((p) => getProjectMargin(p.id)));
-    totalActualMargin = margins.reduce((sum, m) => sum + m.actualMargin, 0);
+    const margins = await getProjectMargins(projects.map((p) => p.id));
+    totalActualMargin = [...margins.values()].reduce((sum, m) => sum + m.actualMargin, 0);
   }
 
   return (

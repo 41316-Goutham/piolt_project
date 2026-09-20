@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { canViewFinance } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { getProjectMargin } from "@/lib/margin";
+import { getProjectMargins } from "@/lib/margin";
 import { formatCurrency } from "@/lib/format";
 import { StatCard } from "@/components/StatCard";
 import Link from "next/link";
@@ -18,12 +18,13 @@ export default async function FinancePage() {
     orderBy: { createdAt: "desc" },
   });
 
-  const margins = await Promise.all(projects.map((p) => getProjectMargin(p.id)));
+  const margins = await getProjectMargins(projects.map((p) => p.id));
+  const marginList = [...margins.values()];
 
-  const totalContractValue = margins.reduce((sum, m) => sum + m.contractValue, 0);
-  const totalInvoiced = margins.reduce((sum, m) => sum + m.invoicedRevenue, 0);
-  const totalCost = margins.reduce((sum, m) => sum + m.totalCost, 0);
-  const totalActualMargin = margins.reduce((sum, m) => sum + m.actualMargin, 0);
+  const totalContractValue = marginList.reduce((sum, m) => sum + m.contractValue, 0);
+  const totalInvoiced = marginList.reduce((sum, m) => sum + m.invoicedRevenue, 0);
+  const totalCost = marginList.reduce((sum, m) => sum + m.totalCost, 0);
+  const totalActualMargin = marginList.reduce((sum, m) => sum + m.actualMargin, 0);
 
   const invoices = await prisma.clientInvoice.findMany({
     where: { status: { in: ["SENT", "PARTIALLY_PAID", "OVERDUE"] } },
@@ -98,23 +99,27 @@ export default async function FinancePage() {
             </tr>
           </thead>
           <tbody>
-            {projects.map((p, i) => (
-              <tr key={p.id} className="border-b border-slate-50 last:border-0">
-                <td className="px-5 py-3">
-                  <Link href={`/admin/projects/${p.id}`} className="text-slate-800 hover:text-amber-600">
-                    {p.title}
-                  </Link>
-                </td>
-                <td className="px-5 py-3 text-slate-600">{formatCurrency(margins[i].contractValue)}</td>
-                <td className="px-5 py-3 text-slate-600">{formatCurrency(margins[i].totalCost)}</td>
-                <td className="px-5 py-3 text-slate-600">
-                  {formatCurrency(margins[i].expectedMargin)} ({margins[i].expectedMarginPercent.toFixed(1)}%)
-                </td>
-                <td className="px-5 py-3 text-slate-800 font-medium">
-                  {formatCurrency(margins[i].actualMargin)} ({margins[i].actualMarginPercent.toFixed(1)}%)
-                </td>
-              </tr>
-            ))}
+            {projects.map((p) => {
+              const m = margins.get(p.id);
+              if (!m) return null;
+              return (
+                <tr key={p.id} className="border-b border-slate-50 last:border-0">
+                  <td className="px-5 py-3">
+                    <Link href={`/admin/projects/${p.id}`} className="text-slate-800 hover:text-amber-600">
+                      {p.title}
+                    </Link>
+                  </td>
+                  <td className="px-5 py-3 text-slate-600">{formatCurrency(m.contractValue)}</td>
+                  <td className="px-5 py-3 text-slate-600">{formatCurrency(m.totalCost)}</td>
+                  <td className="px-5 py-3 text-slate-600">
+                    {formatCurrency(m.expectedMargin)} ({m.expectedMarginPercent.toFixed(1)}%)
+                  </td>
+                  <td className="px-5 py-3 text-slate-800 font-medium">
+                    {formatCurrency(m.actualMargin)} ({m.actualMarginPercent.toFixed(1)}%)
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
