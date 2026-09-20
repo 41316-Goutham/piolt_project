@@ -46,3 +46,7 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# a stray nested clone of this repo (folder named after the GitHub repo)
+# keeps reappearing here from an unidentified source on this machine.
+/piolt_project/

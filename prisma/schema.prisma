@@ -10,26 +10,68 @@ datasource db {
 
 enum Role {
   ADMIN
+  SALES
+  LIAISON
+  INVENTORY_MANAGER
+  SITE_SUPERVISOR
+  ACCOUNTS
+  WORKER
   CUSTOMER
 }
 
+enum Discom {
+  APSPDCL
+  APEPDCL
+  APCPDCL
+}
+
+enum CustomerCategory {
+  RESIDENTIAL
+  COMMERCIAL
+  INDUSTRIAL
+  RWA
+}
+
+enum LeadStatus {
+  NEW
+  SITE_SURVEY
+  QUOTED
+  NEGOTIATION
+  WON
+  LOST
+}
+
 enum ProjectStatus {
-  LEAD
-  SANCTIONED
-  IN_PROGRESS
-  INSTALLED
-  COMMISSIONED
+  ACTIVE
   ON_HOLD
+  CLOSED
+  CANCELLED
 }
 
-enum MilestoneStatus {
-  PENDING
+enum StageStatus {
+  NOT_STARTED
   IN_PROGRESS
-  COMPLETED
-  DELAYED
+  BLOCKED
+  DONE
 }
 
-enum InventoryCategory {
+enum DocumentStatus {
+  PENDING
+  RECEIVED
+  SUBMITTED
+  REJECTED
+  ACCEPTED
+}
+
+enum ApprovalStepStatus {
+  NOT_STARTED
+  SUBMITTED
+  QUERY_RAISED
+  APPROVED
+  REJECTED
+}
+
+enum ProductCategory {
   PANEL
   INVERTER
   BATTERY
@@ -38,107 +80,418 @@ enum InventoryCategory {
   ACCESSORY
 }
 
+enum StockItemStatus {
+  IN_STOCK
+  RESERVED
+  ISSUED
+  INSTALLED
+  RETURNED
+  DAMAGED
+  WARRANTY_CLAIM
+}
+
 enum InvoiceStatus {
   DRAFT
   SENT
+  PARTIALLY_PAID
   PAID
   OVERDUE
 }
 
+enum PaymentMode {
+  CASH
+  BANK_TRANSFER
+  UPI
+  CHEQUE
+  OTHER
+}
+
+enum PaymentMilestoneType {
+  ADVANCE
+  ON_DELIVERY
+  ON_COMMISSIONING
+  BALANCE
+  OTHER
+}
+
+enum CostCategory {
+  MATERIAL_OTHER
+  LABOUR
+  TRANSPORT
+  LIAISON
+  OTHER
+}
+
 model User {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   name         String
-  email        String    @unique
+  email        String   @unique
   passwordHash String
-  role         Role      @default(CUSTOMER)
+  role         Role     @default(CUSTOMER)
   phone        String?
-  createdAt    DateTime  @default(now())
-  projects     Project[]
+  createdAt    DateTime @default(now())
+
+  customer Customer?
+
+  assignedLeads        Lead[]             @relation("LeadAssignee")
+  ownedStages          ProjectStage[]     @relation("StageOwner")
+  receivedGrns         GRN[]              @relation("GrnReceivedBy")
+  issuedStockItems     StockItem[]        @relation("StockIssuedBy")
+  installedStockItems  StockItem[]        @relation("StockInstalledBy")
+  recordedConsumptions StockConsumption[] @relation("ConsumptionRecordedBy")
+  costEntries          CostEntry[]        @relation("CostEnteredBy")
+  recordedPayments     Payment[]          @relation("PaymentRecordedBy")
 }
 
-model Company {
-  id            String          @id @default(cuid())
-  name          String          @unique
-  contactEmail  String?
-  contactPhone  String?
-  notes         String?
-  createdAt     DateTime        @default(now())
-  inventoryItems InventoryItem[]
-  projects      Project[]
+model Customer {
+  id               String            @id @default(cuid())
+  name             String
+  phone            String
+  email            String?
+  address          String?
+  district         String?
+  discom           Discom?
+  serviceNumber    String?
+  consumerNumber   String?
+  sanctionedLoadKw Float?
+  category         CustomerCategory?
+  roofOwnership    String?
+  userId           String?           @unique
+  user             User?             @relation(fields: [userId], references: [id])
+  createdAt        DateTime          @default(now())
+
+  leads    Lead[]
+  projects Project[]
 }
 
-model InventoryItem {
-  id             String            @id @default(cuid())
-  name           String
-  sku            String            @unique
-  category       InventoryCategory
-  companyId      String
-  company        Company           @relation(fields: [companyId], references: [id])
-  quantityInStock Int              @default(0)
-  unit           String            @default("pcs")
-  unitPrice      Float
-  reorderLevel   Int               @default(10)
-  updatedAt      DateTime          @updatedAt
-  createdAt      DateTime          @default(now())
-  sales          Sale[]
+model Lead {
+  id           String     @id @default(cuid())
+  customerId   String
+  customer     Customer   @relation(fields: [customerId], references: [id])
+  status       LeadStatus @default(NEW)
+  source       String?
+  assignedToId String?
+  assignedTo   User?      @relation("LeadAssignee", fields: [assignedToId], references: [id])
+  quotedAmount Float?
+  lostReason   String?
+  notes        String?
+  createdAt    DateTime   @default(now())
+  convertedAt  DateTime?
+  projectId    String?    @unique
+  project      Project?   @relation(fields: [projectId], references: [id])
 }
 
 model Project {
   id                     String        @id @default(cuid())
   title                  String
-  siteAddress            String
-  capacityKw             Float
   customerId             String
-  customer               User          @relation(fields: [customerId], references: [id])
-  companyId              String
-  company                Company       @relation(fields: [companyId], references: [id])
-  sanctionedAmount       Float
-  totalCost              Float
-  subsidyAmount          Float         @default(0)
-  status                 ProjectStatus @default(LEAD)
-  progressPercent        Int           @default(0)
+  customer               Customer      @relation(fields: [customerId], references: [id])
+  systemSizeKw           Float
+  contractValue          Float
+  paymentTermsNotes      String?
+  status                 ProjectStatus @default(ACTIVE)
   startDate              DateTime?
   expectedCompletionDate DateTime?
   actualCompletionDate   DateTime?
   createdAt              DateTime      @default(now())
-  milestones             Milestone[]
-  invoices               Invoice[]
-  sales                  Sale[]
+
+  lead              Lead?
+  stages            ProjectStage[]
+  approvalSteps     ApprovalStep[]
+  documents         DocumentItem[]
+  stockItems        StockItem[]
+  stockConsumptions StockConsumption[]
+  costEntries       CostEntry[]
+  clientInvoices    ClientInvoice[]
+  subsidy           Subsidy?
 }
 
-model Milestone {
-  id            String          @id @default(cuid())
-  projectId     String
-  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  title         String
-  description   String?
-  order         Int
-  plannedDate   DateTime?
-  completedDate DateTime?
-  status        MilestoneStatus @default(PENDING)
+model StageTemplate {
+  id     String  @id @default(cuid())
+  name   String
+  discom Discom?
+
+  steps StageTemplateStep[]
 }
 
-model Sale {
-  id              String        @id @default(cuid())
-  inventoryItemId String
-  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+model StageTemplateStep {
+  id                 String        @id @default(cuid())
+  templateId         String
+  template           StageTemplate @relation(fields: [templateId], references: [id])
+  order              Int
+  stepName           String
+  defaultSlaDays     Int?
+  requiresAllocation Boolean       @default(false)
+
+  projectStages ProjectStage[]
+}
+
+model ProjectStage {
+  id                  String            @id @default(cuid())
+  projectId           String
+  project             Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stageTemplateStepId String
+  stageTemplateStep   StageTemplateStep @relation(fields: [stageTemplateStepId], references: [id])
+  name                String
+  order               Int
+  requiresAllocation  Boolean
+  ownerId             String?
+  owner               User?             @relation("StageOwner", fields: [ownerId], references: [id])
+  startDate           DateTime?
+  targetDate          DateTime?
+  status              StageStatus       @default(NOT_STARTED)
+  blockedReason       String?
+  completedDate       DateTime?
+}
+
+model ApprovalTemplate {
+  id     String @id @default(cuid())
+  name   String
+  discom Discom
+
+  steps ApprovalTemplateStep[]
+}
+
+model ApprovalTemplateStep {
+  id                    String           @id @default(cuid())
+  templateId            String
+  template              ApprovalTemplate @relation(fields: [templateId], references: [id])
+  order                 Int
+  stepName              String
+  requiredDocumentTypes String[]
+  slaDays               Int
+
+  approvalSteps ApprovalStep[]
+}
+
+model ApprovalStep {
+  id                     String               @id @default(cuid())
+  projectId              String
+  project                Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approvalTemplateStepId String
+  approvalTemplateStep   ApprovalTemplateStep @relation(fields: [approvalTemplateStepId], references: [id])
+  name                   String
+  order                  Int
+  slaDays                Int
+  officerId              String?
+  officer                Officer?             @relation(fields: [officerId], references: [id])
+  arnNumber              String?
+  submissionDate         DateTime?
+  followUpDates          DateTime[]
+  responseNotes          String?
+  deficiencyNotes        String?
+  approvalDate           DateTime?
+  status                 ApprovalStepStatus   @default(NOT_STARTED)
+  dueDate                DateTime?
+}
+
+model DocumentItem {
+  id         String         @id @default(cuid())
+  projectId  String
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type       String
+  status     DocumentStatus @default(PENDING)
+  remarks    String?
+  fileUrl    String?
+  uploadedAt DateTime?
+}
+
+model Officer {
+  id          String  @id @default(cuid())
+  discom      Discom
+  circle      String?
+  division    String?
+  section     String?
+  name        String
+  designation String
+  phone       String?
+  address     String?
+
+  approvalSteps ApprovalStep[]
+}
+
+model Supplier {
+  id           String  @id @default(cuid())
+  name         String  @unique
+  contactEmail String?
+  contactPhone String?
+  gstin        String?
+  paymentTerms String?
+  notes        String?
+
+  products         Product[]
+  purchaseInvoices PurchaseInvoice[]
+}
+
+model Product {
+  id               String          @id @default(cuid())
+  name             String
+  sku              String          @unique
+  category         ProductCategory
+  supplierId       String
+  supplier         Supplier        @relation(fields: [supplierId], references: [id])
+  spec             String?
+  unit             String          @default("pcs")
+  unitPriceDefault Float?
+  isAlmmCompliant  Boolean         @default(false)
+  reorderLevel     Int?
+  quantityInStock  Int             @default(0)
+
+  purchaseInvoiceLines PurchaseInvoiceLine[]
+  grnLines             GRNLine[]
+  stockItems           StockItem[]
+  stockConsumptions    StockConsumption[]
+}
+
+model PurchaseInvoice {
+  id            String   @id @default(cuid())
+  invoiceNumber String   @unique
+  supplierId    String
+  supplier      Supplier @relation(fields: [supplierId], references: [id])
+  invoiceDate   DateTime
+  totalAmount   Float
+  gstAmount     Float?
+
+  lines PurchaseInvoiceLine[]
+  grns  GRN[]
+}
+
+model PurchaseInvoiceLine {
+  id                String          @id @default(cuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  productId         String
+  product           Product         @relation(fields: [productId], references: [id])
+  quantity          Int
+  unitPrice         Float
+  gstRate           Float?
+  lineTotal         Float
+
+  grnLines GRNLine[]
+}
+
+model GRN {
+  id                String          @id @default(cuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id])
+  receivedDate      DateTime        @default(now())
+  receivedById      String
+  receivedBy        User            @relation("GrnReceivedBy", fields: [receivedById], references: [id])
+  notes             String?
+
+  lines GRNLine[]
+}
+
+model GRNLine {
+  id                    String              @id @default(cuid())
+  grnId                 String
+  grn                   GRN                 @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  purchaseInvoiceLineId String
+  purchaseInvoiceLine   PurchaseInvoiceLine @relation(fields: [purchaseInvoiceLineId], references: [id])
+  productId             String
+  product               Product             @relation(fields: [productId], references: [id])
+  qtyReceived           Int
+  qtyDamaged            Int                 @default(0)
+  qtyShort              Int                 @default(0)
+
+  stockItems StockItem[]
+}
+
+model StockItem {
+  id                     String          @id @default(cuid())
+  serialNumber           String          @unique
+  productId              String
+  product                Product         @relation(fields: [productId], references: [id])
+  grnLineId              String
+  grnLine                GRNLine         @relation(fields: [grnLineId], references: [id])
+  unitCost               Float
+  status                 StockItemStatus @default(IN_STOCK)
+  projectId              String?
+  project                Project?        @relation(fields: [projectId], references: [id])
+  locationOrWarehouse    String?
+  reservedAt             DateTime?
+  issuedAt               DateTime?
+  issuedById             String?
+  issuedBy               User?           @relation("StockIssuedBy", fields: [issuedById], references: [id])
+  installedAt            DateTime?
+  installedConfirmedById String?
+  installedConfirmedBy   User?           @relation("StockInstalledBy", fields: [installedConfirmedById], references: [id])
+  notes                  String?
+}
+
+model StockConsumption {
+  id              String   @id @default(cuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
   projectId       String?
-  project         Project?      @relation(fields: [projectId], references: [id])
+  project         Project? @relation(fields: [projectId], references: [id])
   quantity        Int
-  unitPrice       Float
-  totalAmount     Float
-  saleDate        DateTime      @default(now())
+  unitCost        Float
+  consumptionDate DateTime @default(now())
+  recordedById    String
+  recordedBy      User     @relation("ConsumptionRecordedBy", fields: [recordedById], references: [id])
 }
 
-model Invoice {
-  id            String        @id @default(cuid())
-  invoiceNumber String        @unique
+model SubsidySlab {
+  id       String  @id @default(cuid())
+  minKw    Float
+  maxKw    Float?
+  amount   Float
+  label    String?
+  isActive Boolean @default(true)
+
+  subsidies Subsidy[]
+}
+
+model Subsidy {
+  id              String       @id @default(cuid())
+  projectId       String       @unique
+  project         Project      @relation(fields: [projectId], references: [id])
+  isEligible      Boolean      @default(true)
+  expectedAmount  Float
+  slabId          String?
+  slab            SubsidySlab? @relation(fields: [slabId], references: [id])
+  claimDate       DateTime?
+  referenceNumber String?
+  receivedDate    DateTime?
+  isDbtToCustomer Boolean      @default(true)
+}
+
+model CostEntry {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category    CostCategory
+  amount      Float
+  description String?
+  date        DateTime     @default(now())
+  enteredById String
+  enteredBy   User         @relation("CostEnteredBy", fields: [enteredById], references: [id])
+}
+
+model ClientInvoice {
+  id            String               @id @default(cuid())
+  invoiceNumber String               @unique
   projectId     String
-  project       Project       @relation(fields: [projectId], references: [id])
+  project       Project              @relation(fields: [projectId], references: [id])
+  milestoneType PaymentMilestoneType
   amount        Float
-  status        InvoiceStatus @default(DRAFT)
-  issueDate     DateTime      @default(now())
-  dueDate       DateTime
-  paidDate      DateTime?
+  status        InvoiceStatus        @default(DRAFT)
+  issueDate     DateTime             @default(now())
+  dueDate       DateTime?
   description   String?
+
+  payments Payment[]
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  clientInvoiceId String
+  clientInvoice   ClientInvoice @relation(fields: [clientInvoiceId], references: [id], onDelete: Cascade)
+  amount          Float
+  date            DateTime      @default(now())
+  mode            PaymentMode
+  referenceNumber String?
+  recordedById    String
+  recordedBy      User          @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
 }

@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
+import { isInternalRole } from "@/lib/roles";
 
 export default auth((req) => {
   const { nextUrl } = req;
@@ -15,7 +16,7 @@ export default auth((req) => {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (isAdminRoute && role !== "ADMIN") {
+  if (isAdminRoute && !(role && isInternalRole(role))) {
     return NextResponse.redirect(new URL("/login", nextUrl.origin));
   }
 

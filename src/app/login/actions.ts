@@ -3,6 +3,7 @@
 import { signIn } from "@/auth";
 import { AuthError } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { isInternalRole } from "@/lib/roles";
 
 export type LoginState = {
   error: string | null;
@@ -30,5 +31,6 @@ export async function loginAction(
   }
 
   const user = await prisma.user.findUnique({ where: { email } });
-  return { error: null, redirectTo: user?.role === "ADMIN" ? "/admin" : "/portal" };
+  const redirectTo = user && isInternalRole(user.role) ? "/admin" : "/portal";
+  return { error: null, redirectTo };
 }

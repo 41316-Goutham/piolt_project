@@ -1,99 +1,112 @@
 import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/StatusBadge";
+import { isApprovalStepOverdue } from "@/lib/overdue";
+import Link from "next/link";
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+const DISCOMS = ["APSPDCL", "APEPDCL", "APCPDCL"];
+const STATUSES = ["ACTIVE", "ON_HOLD", "CLOSED", "CANCELLED"];
 
-function formatDate(date: Date | null) {
-  if (!date) return "—";
-  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(date);
-}
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ discom?: string; status?: string; delayed?: string }>;
+}) {
+  const { discom, status, delayed } = await searchParams;
 
-export default async function ProjectsPage() {
   const projects = await prisma.project.findMany({
+    where: {
+      status: status ? (status as never) : undefined,
+      customer: discom ? { discom: discom as never } : undefined,
+    },
     include: {
       customer: true,
-      company: true,
-      milestones: { orderBy: { order: "asc" } },
+      stages: { orderBy: { order: "asc" } },
+      approvalSteps: true,
     },
     orderBy: { createdAt: "desc" },
   });
 
+  const rows = projects
+    .map((p) => {
+      const currentStage = p.stages.find((s) => s.status === "IN_PROGRESS" || s.status === "BLOCKED") ?? p.stages[p.stages.length - 1];
+      const doneStages = p.stages.filter((s) => s.status === "DONE").length;
+      const progressPercent = p.stages.length > 0 ? Math.round((doneStages / p.stages.length) * 100) : 0;
+      const isDelayed = p.approvalSteps.some((a) => isApprovalStepOverdue(a));
+      return { project: p, currentStage, progressPercent, isDelayed };
+    })
+    .filter((r) => (delayed === "true" ? r.isDelayed : true));
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Projects &amp; timelines</h1>
-        <p className="text-sm text-slate-500 mt-1">{projects.length} projects across all customers</p>
+        <h1 className="text-2xl font-semibold text-slate-900">Projects</h1>
+        <p className="text-sm text-slate-500 mt-1">{rows.length} of {projects.length} projects</p>
       </div>
 
-      <div className="space-y-4">
-        {projects.map((project) => (
-          <div key={project.id} className="border border-slate-200 rounded-xl bg-white p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-              <div>
-                <h2 className="font-semibold text-slate-900">{project.title}</h2>
-                <p className="text-sm text-slate-500">
-                  {project.customer.name} &middot; {project.siteAddress} &middot; {project.capacityKw} kW &middot;{" "}
-                  {project.company.name}
-                </p>
-              </div>
-              <div className="text-right">
-                <StatusBadge status={project.status} />
-                <p className="text-sm text-slate-500 mt-2">
-                  Sanctioned: <span className="font-medium text-slate-800">{formatCurrency(project.sanctionedAmount)}</span>
-                </p>
-              </div>
-            </div>
+      <form method="get" className="flex flex-wrap gap-3 items-end">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">DISCOM</label>
+          <select name="discom" defaultValue={discom ?? ""} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <option value="">All</option>
+            {DISCOMS.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
+          <select name="status" defaultValue={status ?? ""} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <option value="">All</option>
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700 pb-2">
+          <input type="checkbox" name="delayed" value="true" defaultChecked={delayed === "true"} className="rounded border-slate-300" />
+          Delayed only
+        </label>
+        <button type="submit" className="rounded-lg bg-slate-900 hover:bg-slate-700 text-white text-sm font-medium px-4 py-2">
+          Filter
+        </button>
+      </form>
 
-            <div className="mb-4">
-              <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-                <span>Progress</span>
-                <span>{project.progressPercent}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-amber-500"
-                  style={{ width: `${project.progressPercent}%` }}
-                />
-              </div>
-            </div>
-
-            <ol className="space-y-3">
-              {project.milestones.map((m) => (
-                <li key={m.id} className="flex items-start gap-3">
-                  <span
-                    className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${
-                      m.status === "COMPLETED"
-                        ? "bg-emerald-500"
-                        : m.status === "DELAYED"
-                        ? "bg-red-500"
-                        : m.status === "IN_PROGRESS"
-                        ? "bg-amber-500"
-                        : "bg-slate-300"
-                    }`}
-                  />
-                  <div className="flex-1 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-slate-800">{m.title}</p>
-                      {m.description && <p className="text-xs text-slate-400">{m.description}</p>}
-                    </div>
-                    <div className="text-right text-xs text-slate-400">
-                      <StatusBadge status={m.status} />
-                      <p className="mt-1">
-                        {m.completedDate ? formatDate(m.completedDate) : `Planned: ${formatDate(m.plannedDate)}`}
-                      </p>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-        ))}
+      <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-slate-400 border-b border-slate-100">
+              <th className="px-5 py-2 font-medium">Project</th>
+              <th className="px-5 py-2 font-medium">Customer</th>
+              <th className="px-5 py-2 font-medium">DISCOM</th>
+              <th className="px-5 py-2 font-medium">Current stage</th>
+              <th className="px-5 py-2 font-medium">Progress</th>
+              <th className="px-5 py-2 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ project, currentStage, progressPercent, isDelayed }) => (
+              <tr key={project.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                <td className="px-5 py-3">
+                  <Link href={`/admin/projects/${project.id}`} className="text-slate-800 hover:text-amber-600 font-medium">
+                    {project.title}
+                  </Link>
+                  {isDelayed && <span className="ml-2 text-xs font-medium text-red-600">DELAYED</span>}
+                </td>
+                <td className="px-5 py-3 text-slate-600">{project.customer.name}</td>
+                <td className="px-5 py-3 text-slate-600">{project.customer.discom ?? "—"}</td>
+                <td className="px-5 py-3 text-slate-600">{currentStage?.name ?? "—"}</td>
+                <td className="px-5 py-3 text-slate-600">{progressPercent}%</td>
+                <td className="px-5 py-3">
+                  <StatusBadge status={project.status} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

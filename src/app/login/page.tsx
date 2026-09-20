@@ -76,6 +76,7 @@ export default function LoginPage() {
           <p className="font-medium text-slate-500">Demo credentials</p>
           <p>Admin: admin@sunpowergenesys.com / Admin@123</p>
           <p>Customer: ravi.kumar@example.com / Customer@123</p>
+          <p className="text-slate-400">Full role list (Sales, Liaison, Inventory, Supervisor, Accounts, Worker) in README.md</p>
         </div>
 
         <p className="text-center text-sm text-slate-500 mt-6">

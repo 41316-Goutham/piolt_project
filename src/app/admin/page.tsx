@@ -1,61 +1,97 @@
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
+import { formatCurrency } from "@/lib/format";
+import { canViewFinance } from "@/lib/roles";
+import { isApprovalStepOverdue } from "@/lib/overdue";
+import { getProjectMargin } from "@/lib/margin";
 import Link from "next/link";
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
 export default async function AdminOverviewPage() {
-  const [customerCount, projects, sales, invoices, lowStockItems] = await Promise.all([
-    prisma.user.count({ where: { role: "CUSTOMER" } }),
+  const session = await auth();
+  const financeVisible = session ? canViewFinance(session.user.role) : false;
+
+  const [customerCount, projects, products] = await Promise.all([
+    prisma.customer.count(),
     prisma.project.findMany({
-      include: { customer: true, company: true },
+      include: { customer: true, stages: { orderBy: { order: "asc" } }, approvalSteps: true },
       orderBy: { createdAt: "desc" },
     }),
-    prisma.sale.findMany(),
-    prisma.invoice.findMany(),
-    prisma.inventoryItem.findMany({ where: { quantityInStock: { lte: 20 } } }),
+    prisma.product.findMany({ include: { stockItems: { select: { status: true } } } }),
   ]);
 
-  const activeProjects = projects.filter((p) =>
-    ["SANCTIONED", "IN_PROGRESS", "INSTALLED"].includes(p.status)
-  ).length;
-  const totalRevenue = sales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const pendingInvoiceAmount = invoices
-    .filter((i) => i.status === "SENT" || i.status === "OVERDUE")
-    .reduce((sum, i) => sum + i.amount, 0);
+  const statusCounts: Record<string, number> = {};
+  for (const p of projects) {
+    statusCounts[p.status] = (statusCounts[p.status] ?? 0) + 1;
+  }
 
-  const recentProjects = projects.slice(0, 6);
+  const delayedProjects = projects.filter((p) => p.approvalSteps.some((a) => isApprovalStepOverdue(a)));
+
+  const lowStockProducts = products.filter((p) => {
+    const isSerialized = p.category === "PANEL" || p.category === "INVERTER";
+    const inStock = isSerialized ? p.stockItems.filter((s) => s.status === "IN_STOCK").length : p.quantityInStock;
+    return p.reorderLevel != null && inStock <= p.reorderLevel;
+  });
+
+  let receivablesDue = 0;
+  let totalActualMargin = 0;
+  if (financeVisible) {
+    const invoices = await prisma.clientInvoice.findMany({
+      where: { status: { in: ["SENT", "PARTIALLY_PAID", "OVERDUE"] } },
+      include: { payments: true },
+    });
+    receivablesDue = invoices.reduce((sum, inv) => sum + (inv.amount - inv.payments.reduce((s, p) => s + p.amount, 0)), 0);
+
+    const margins = await Promise.all(projects.map((p) => getProjectMargin(p.id)));
+    totalActualMargin = margins.reduce((sum, m) => sum + m.actualMargin, 0);
+  }
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Overview</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Snapshot of channel partner operations across all brands.
-        </p>
+        <p className="text-sm text-slate-500 mt-1">Snapshot of operations across all projects.</p>
       </div>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total customers" value={String(customerCount)} />
-        <StatCard label="Active projects" value={String(activeProjects)} hint={`${projects.length} total`} />
-        <StatCard label="Total sales revenue" value={formatCurrency(totalRevenue)} />
-        <StatCard label="Pending invoice amount" value={formatCurrency(pendingInvoiceAmount)} />
+        <StatCard label="Customers" value={String(customerCount)} />
+        <StatCard label="Active projects" value={String(statusCounts.ACTIVE ?? 0)} hint={`${projects.length} total`} />
+        <StatCard label="Delayed projects" value={String(delayedProjects.length)} hint="At least one overdue approval step" />
+        {financeVisible ? (
+          <StatCard label="Receivables due" value={formatCurrency(receivablesDue)} />
+        ) : (
+          <StatCard label="Low-stock items" value={String(lowStockProducts.length)} />
+        )}
       </div>
 
-      {lowStockItems.length > 0 && (
+      {financeVisible && (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard label="Total actual margin" value={formatCurrency(totalActualMargin)} />
+          <StatCard label="Low-stock items" value={String(lowStockProducts.length)} />
+        </div>
+      )}
+
+      {delayedProjects.length > 0 && (
+        <div className="border border-red-200 bg-red-50 rounded-xl p-4">
+          <p className="text-sm font-medium text-red-800 mb-2">Delayed projects (overdue DISCOM approval step)</p>
+          <ul className="text-sm text-red-700 space-y-1">
+            {delayedProjects.map((p) => (
+              <li key={p.id}>
+                <Link href={`/admin/projects/${p.id}`} className="underline">
+                  {p.title}
+                </Link>{" "}
+                — {p.customer.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {lowStockProducts.length > 0 && (
         <div className="border border-amber-200 bg-amber-50 rounded-xl p-4">
           <p className="text-sm font-medium text-amber-800">
-            {lowStockItems.length} item(s) at or below reorder level
-          </p>
-          <p className="text-xs text-amber-700 mt-1">
-            {lowStockItems.map((i) => i.name).join(", ")} &mdash;{" "}
+            {lowStockProducts.length} item(s) at or below reorder level —{" "}
             <Link href="/admin/inventory" className="underline">
               view inventory
             </Link>
@@ -75,23 +111,28 @@ export default async function AdminOverviewPage() {
             <tr className="text-left text-slate-400 border-b border-slate-100">
               <th className="px-5 py-2 font-medium">Project</th>
               <th className="px-5 py-2 font-medium">Customer</th>
-              <th className="px-5 py-2 font-medium">Brand</th>
+              <th className="px-5 py-2 font-medium">Current stage</th>
               <th className="px-5 py-2 font-medium">Status</th>
-              <th className="px-5 py-2 font-medium">Progress</th>
             </tr>
           </thead>
           <tbody>
-            {recentProjects.map((p) => (
-              <tr key={p.id} className="border-b border-slate-50 last:border-0">
-                <td className="px-5 py-3 text-slate-800">{p.title}</td>
-                <td className="px-5 py-3 text-slate-600">{p.customer.name}</td>
-                <td className="px-5 py-3 text-slate-600">{p.company.name}</td>
-                <td className="px-5 py-3">
-                  <StatusBadge status={p.status} />
-                </td>
-                <td className="px-5 py-3 text-slate-600">{p.progressPercent}%</td>
-              </tr>
-            ))}
+            {projects.slice(0, 6).map((p) => {
+              const currentStage = p.stages.find((s) => s.status === "IN_PROGRESS" || s.status === "BLOCKED") ?? p.stages[p.stages.length - 1];
+              return (
+                <tr key={p.id} className="border-b border-slate-50 last:border-0">
+                  <td className="px-5 py-3">
+                    <Link href={`/admin/projects/${p.id}`} className="text-slate-800 hover:text-amber-600 font-medium">
+                      {p.title}
+                    </Link>
+                  </td>
+                  <td className="px-5 py-3 text-slate-600">{p.customer.name}</td>
+                  <td className="px-5 py-3 text-slate-600">{currentStage?.name ?? "—"}</td>
+                  <td className="px-5 py-3">
+                    <StatusBadge status={p.status} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
